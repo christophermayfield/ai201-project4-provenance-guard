@@ -46,6 +46,28 @@ def read_recent(limit: int = 50) -> list[dict]:
     return [json.loads(line) for line in reversed(recent)]
 
 
+def recent_entries(limit: int = 50) -> list[dict]:
+    """Recent entries (newest first) with analysis rows annotated `appeal_filed`.
+
+    The append-only log stores analysis and appeal events separately; this view
+    cross-references them so each classification entry shows whether an appeal
+    has since been filed for that content_id.
+    """
+    all_events = read_recent(0)  # everything, newest first
+    appealed = {
+        e["content_id"] for e in all_events
+        if e.get("event_type") == "appeal_received"
+    }
+    sliced = all_events[:limit] if limit else all_events
+    out = []
+    for e in sliced:
+        e = dict(e)
+        if e.get("event_type") == "analysis_completed":
+            e["appeal_filed"] = e["content_id"] in appealed
+        out.append(e)
+    return out
+
+
 def find_by_content_id(content_id: str) -> list[dict]:
     """Return all events for a content_id (used by the appeal flow)."""
     if not os.path.exists(config.AUDIT_LOG_PATH):

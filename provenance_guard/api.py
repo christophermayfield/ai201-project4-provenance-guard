@@ -1,11 +1,18 @@
 """API blueprint.
 
-Routes (planning.md > API Surface):
-  POST /api/v1/analyze   - the "submit" flow; runs the analysis pipeline
+Root-level routes (the submission/appeal flow):
+  POST /submit    - classify a submission, return attribution + transparency label
+  POST /appeal    - contest a prior result by content_id (-> under_review)
+  GET  /appeals   - reviewer queue (optional ?status= filter)
+  GET  /log       - recent audit-log entries (optional ?limit=)
+
+Versioned routes (supporting):
+  POST /api/v1/analyze   - text-only analysis entrypoint (local heuristic signal)
   GET  /api/v1/health    - liveness/readiness
   GET  /api/v1/signals   - signal catalogue
 
-M3 scope: the analyze route is wired end-to-end but only runs the first signal.
+/submit runs the full two-signal ensemble (Groq + stylometry), combines them via
+scoring.py, writes an audit entry, and returns the structured response.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from flask import Blueprint, jsonify, request
 
 from . import audit, config, scoring
 from .chunking import split_sentences
+from .extensions import limiter
 from .groq_signal import assess_with_groq
 from .signals import SIGNALS, signal_stylometry, stylometry_metrics
 
@@ -28,12 +36,13 @@ root_bp = Blueprint("root", __name__)
 
 
 @root_bp.post("/submit")
+@limiter.limit(config.SUBMIT_RATE_LIMITS)
 def submit():
-    """Submission entrypoint stub.
+    """Submission entrypoint.
 
-    Accepts a JSON body with at minimum `text` and `creator_id`. For now it
-    returns a hardcoded response so the route can be verified before any real
-    analysis logic is wired in.
+    Accepts a JSON body with at minimum `text` and `creator_id`, runs the
+    two-signal ensemble, returns the attribution + transparency label, and
+    writes an audit entry. Rate-limited per IP (see config.SUBMIT_RATE_LIMITS).
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -140,8 +149,6 @@ class ApiError(Exception):
 def _error_payload(code: str, message: str):
     return {"error": {"code": code, "message": message}}
 
-
-# --- POST /api/v1/analyze (submit flow) ---------------------------------------
 
 @root_bp.post("/appeal")
 def appeal():
@@ -250,10 +257,11 @@ def get_log():
         limit = int(request.args.get("limit", 50))
     except (TypeError, ValueError):
         limit = 50
-    return jsonify({"entries": audit.read_recent(limit)}), 200
+    return jsonify({"entries": audit.recent_entries(limit)}), 200
 
 
 @bp.post("/analyze")
+@limiter.limit(config.ANALYZE_RATE_LIMIT)
 def analyze():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):

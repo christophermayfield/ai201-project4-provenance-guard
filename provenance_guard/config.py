@@ -16,7 +16,13 @@ API_PREFIX = "/api/v1"
 MIN_TEXT_LENGTH = 50      # chars; below this, variance signals are noise -> 422
 MAX_TEXT_LENGTH = 20_000  # chars; above this -> 413
 
-# --- Rate limiting (flask-limiter) ---
+# --- Rate limiting (flask-limiter), per IP ---
+# /submit triggers a Groq LLM call (cost + latency), so it gets tiered limits
+# sized to a real creator's workflow while capping scripted abuse. See README
+# "Rate limiting" for the reasoning behind these numbers.
+SUBMIT_RATE_LIMITS = os.getenv(
+    "SUBMIT_RATE_LIMIT", "10 per minute; 100 per hour; 500 per day"
+)
 ANALYZE_RATE_LIMIT = os.getenv("ANALYZE_RATE_LIMIT", "10/minute")
 
 # --- Groq (LLM-backed signals) ---

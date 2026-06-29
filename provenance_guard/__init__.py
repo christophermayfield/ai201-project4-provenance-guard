@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 from flask import Flask, jsonify
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
-from . import config
 from .api import ApiError, _error_payload, bp, root_bp
-
-limiter = Limiter(key_func=get_remote_address)
+from .extensions import limiter
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
     limiter.init_app(app)
-
-    # Rate-limit the analyze route per the API surface (per-IP).
-    limiter.limit(config.ANALYZE_RATE_LIMIT)(bp)
 
     app.register_blueprint(bp)
     app.register_blueprint(root_bp)
