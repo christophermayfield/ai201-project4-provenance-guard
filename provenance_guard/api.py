@@ -143,6 +143,102 @@ def _error_payload(code: str, message: str):
 
 # --- POST /api/v1/analyze (submit flow) ---------------------------------------
 
+@root_bp.post("/appeal")
+def appeal():
+    """Contest a prior analysis result (planning.md > Appeals Workflow).
+
+    Requires `content_id` (from /submit) and a `reason`. Transitions the
+    original result to `under_review` and writes an `appeal_received` audit
+    event. Anyone holding a content_id can appeal (no auth in v1).
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ApiError(400, "validation_error", "Request body must be a JSON object.")
+
+    content_id = data.get("content_id")
+    reason = data.get("reason")
+    if not content_id:
+        raise ApiError(400, "validation_error", "Field 'content_id' is required.")
+    if not reason:
+        raise ApiError(400, "validation_error", "Field 'reason' is required.")
+
+    claimed_origin = data.get("claimed_origin")
+    if claimed_origin and claimed_origin not in ("human", "ai", "mixed"):
+        raise ApiError(400, "validation_error",
+                       "claimed_origin must be one of: human, ai, mixed.")
+
+    # The content_id must correspond to a real prior submission.
+    events = audit.find_by_content_id(content_id)
+    if not any(e.get("event_type") == "analysis_completed" for e in events):
+        raise ApiError(404, "unknown_content",
+                       f"No submission found for content_id '{content_id}'.")
+
+    previous_status = events[-1].get("status", "classified")
+    appeal_id = "a_" + uuid.uuid4().hex[:12]
+    new_status = "under_review"
+
+    audit.log_event(
+        "appeal_received",
+        content_id,
+        appeal_id=appeal_id,
+        reason=reason,
+        claimed_origin=claimed_origin,
+        contact=data.get("contact"),
+        previous_status=previous_status,
+        status=new_status,
+    )
+
+    return jsonify({
+        "appeal_id": appeal_id,
+        "content_id": content_id,
+        "status": new_status,
+        "previous_status": previous_status,
+        "message": "Appeal received and under review.",
+    }), 201
+
+
+@root_bp.get("/appeals")
+def appeals_queue():
+    """Reviewer-only appeal queue (planning.md > Appeals Workflow).
+
+    Joins each appeal to its original analysis result so a reviewer can judge
+    the call. Optional `?status=` filter (e.g. under_review). No auth in v1.
+    """
+    status_filter = request.args.get("status")
+    events = audit.read_recent(0)  # all events, newest first
+
+    # Latest analysis_completed per content_id = the original result.
+    analyses = {}
+    for e in events:  # newest-first, so first seen is the latest
+        if e.get("event_type") == "analysis_completed" and e["content_id"] not in analyses:
+            analyses[e["content_id"]] = e
+
+    queue = []
+    for e in events:
+        if e.get("event_type") != "appeal_received":
+            continue
+        if status_filter and e.get("status") != status_filter:
+            continue
+        original = analyses.get(e["content_id"], {})
+        queue.append({
+            "appeal_id": e.get("appeal_id"),
+            "content_id": e["content_id"],
+            "status": e.get("status"),
+            "submitted_at": e.get("timestamp"),
+            "reason": e.get("reason"),
+            "claimed_origin": e.get("claimed_origin"),
+            "original_result": {
+                "attribution": original.get("attribution"),
+                "confidence": original.get("confidence"),
+                "llm_score": original.get("llm_score"),
+                "stylometry_score": original.get("stylometry_score"),
+                "creator_id": original.get("creator_id"),
+            },
+        })
+
+    return jsonify({"appeals": queue, "count": len(queue)}), 200
+
+
 @root_bp.get("/log")
 def get_log():
     """Return the most recent audit log entries as JSON.

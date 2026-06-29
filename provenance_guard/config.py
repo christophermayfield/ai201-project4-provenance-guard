@@ -75,7 +75,7 @@ LABEL_TEXT = {
     ),
     "uncertain": (
         "Inconclusive. The signals are mixed and we can't reliably attribute "
-        "this content. This is an estimate, not proof - please use your own "
+        "this content. This is an estimate, not proof \u2014 please use your own "
         "judgment and additional context before drawing conclusions."
     ),
 }

@@ -81,6 +81,26 @@ def build_label(label: str, confidence: float) -> dict[str, str]:
     return {"text": config.LABEL_TEXT["uncertain"], "tone": "neutral"}
 
 
+def generate_label(confidence: float, false_positive: float | None = None) -> dict:
+    """Map a confidence score directly to the full transparency label.
+
+    Convenience wrapper over classify() + build_label(): given just a confidence
+    (and optionally a false-positive probability), returns the category, band,
+    user-facing text, and tone.
+    """
+    if false_positive is None:
+        false_positive = estimate_false_positive(confidence)
+    label, band = classify(confidence, false_positive)
+    copy = build_label(label, confidence)
+    return {
+        "category": label,
+        "confidence": round(confidence, 4),
+        "band": band,
+        "text": copy["text"],
+        "tone": copy["tone"],
+    }
+
+
 def palette_color(confidence: float) -> str:
     """Ombre red -> yellow -> green mapped from confidence (matches API example)."""
     stops = [(0.0, (231, 76, 60)), (0.5, (241, 196, 15)), (1.0, (46, 204, 113))]
