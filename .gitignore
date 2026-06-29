@@ -15,5 +15,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# Runtime data (audit log, etc.)
+data/
+
 # OS / editor
 .DS_Store
